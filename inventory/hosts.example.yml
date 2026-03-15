@@ -1,0 +1,12 @@
+all:
+  children:
+    iran:
+      hosts:
+        matrix-iran:
+          ansible_host: your-iran-ssh-host
+          ansible_user: root  # or "ubuntu" if root login is disabled
+    europe:
+      hosts:
+        matrix-eu:
+          ansible_host: your-eu-ssh-host
+          ansible_user: root

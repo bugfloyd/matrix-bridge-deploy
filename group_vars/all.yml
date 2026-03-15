@@ -1,0 +1,26 @@
+# =============================================================================
+# Shared Configuration (applies to all regions)
+# =============================================================================
+
+# --- Secrets (auto-generated on first run, stored in credentials/) ---
+matrix_registration_shared_secret: "{{ lookup('password', 'credentials/registration_shared_secret length=64 chars=ascii_letters,digits') }}"
+matrix_macaroon_secret_key: "{{ lookup('password', 'credentials/macaroon_secret_key length=64 chars=ascii_letters,digits') }}"
+matrix_form_secret: "{{ lookup('password', 'credentials/form_secret length=64 chars=ascii_letters,digits') }}"
+postgres_password: "{{ lookup('password', 'credentials/postgres_password length=32 chars=ascii_letters,digits') }}"
+
+# --- Paths ---
+matrix_base_dir: "/opt/matrix"
+
+# --- Registration ---
+matrix_enable_registration: false
+
+# --- Retention / Hardening ---
+matrix_retention_max_lifetime: "30d"
+matrix_minimal_logging: true
+
+# --- TLS (cert_dir is set per region in iran.yml/europe.yml) ---
+matrix_tls_cert_path: "{{ matrix_tls_cert_dir }}/fullchain.pem"
+matrix_tls_key_path: "{{ matrix_tls_cert_dir }}/privkey.pem"
+
+# --- SSH Proxy port (used when use_proxy is true) ---
+apt_proxy_port: 8185

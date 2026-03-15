@@ -1,0 +1,40 @@
+# =============================================================================
+# Europe Region Configuration
+# =============================================================================
+
+# --- Connectivity ---
+# EU server has direct internet access; no proxy needed
+use_proxy: false
+
+# No registry mirrors needed (direct access to Docker Hub)
+docker_registry_mirrors: []
+
+# TLS certificates are managed directly on the server via certbot
+certbot_on_server: true
+
+# Cloudflare API token for DNS-01 challenge (read from credentials/ if available)
+cloudflare_api_token: "{{ lookup('file', 'credentials/cloudflare_token', errors='ignore') | default('') }}"
+
+# --- Domain Configuration ---
+matrix_server_name: "eu.example.com"
+matrix_hostname: "eu.example.com"
+element_hostname: "chat-eu.example.com"
+
+# --- TLS cert path ---
+matrix_tls_cert_dir: "/etc/letsencrypt/live/eu.example.com"
+
+# --- Locale ---
+matrix_timezone: "Europe/Berlin"
+element_country_code: "DE"
+
+# --- Federation ---
+matrix_federation_port: 8449
+
+# Resolve federated servers to localhost (traffic goes through SSH tunnel)
+# hostname: the remote server's Matrix hostname
+# port: the remote server's federation port (forwarded via SSH tunnel)
+federation_peers:
+  - { hostname: "ir.example.com", port: 8448 }
+
+matrix_federation_whitelist:
+  - "ir.example.com"

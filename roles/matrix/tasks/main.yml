@@ -1,0 +1,145 @@
+---
+- name: Create directory structure
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode | default('0755') }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+  loop:
+    - { path: "{{ matrix_base_dir }}" }
+    - { path: "{{ matrix_base_dir }}/synapse", owner: "991", group: "991" }
+    - { path: "{{ matrix_base_dir }}/nginx" }
+    - { path: "{{ matrix_tls_cert_dir }}" }
+
+# --- TLS ---
+- name: Check if TLS certificate exists
+  stat:
+    path: "{{ matrix_tls_cert_path }}"
+  register: tls_cert
+
+- name: Generate self-signed certificate (use sync-certs.sh later for real cert)
+  command: >
+    openssl req -x509 -nodes -days 3650
+    -newkey rsa:2048
+    -keyout {{ matrix_tls_key_path }}
+    -out {{ matrix_tls_cert_path }}
+    -subj "/CN={{ matrix_hostname }}"
+    -addext "subjectAltName=DNS:{{ matrix_hostname }},DNS:{{ element_hostname }},DNS:{{ matrix_server_name }}"
+  when: not tls_cert.stat.exists
+
+# --- Synapse signing key ---
+- name: Check if Synapse signing key exists
+  stat:
+    path: "{{ matrix_base_dir }}/synapse/signing.key"
+  register: signing_key
+
+- name: Generate Synapse signing key
+  shell: |
+    python3 -c "
+    from signedjson.key import generate_signing_key, write_signing_keys
+    key = generate_signing_key('auto')
+    with open('{{ matrix_base_dir }}/synapse/signing.key', 'w') as f:
+        write_signing_keys(f, [key])
+    " 2>/dev/null || \
+    python3 -c "
+    import base64, os
+    key_bytes = os.urandom(32)
+    key_b64 = base64.b64encode(key_bytes).decode().rstrip('=')
+    with open('{{ matrix_base_dir }}/synapse/signing.key', 'w') as f:
+        f.write('ed25519 auto ' + key_b64)
+    "
+  when: not signing_key.stat.exists
+
+- name: Fix Synapse data directory ownership
+  file:
+    path: "{{ matrix_base_dir }}/synapse"
+    owner: "991"
+    group: "991"
+    recurse: true
+
+# --- Template configs ---
+- name: Deploy Synapse configuration
+  template:
+    src: homeserver.yaml.j2
+    dest: "{{ matrix_base_dir }}/synapse/homeserver.yaml"
+    owner: "991"
+    group: "991"
+    mode: "0640"
+  notify: restart synapse
+
+- name: Deploy Synapse log configuration
+  template:
+    src: log.config.j2
+    dest: "{{ matrix_base_dir }}/synapse/log.config"
+    owner: "991"
+    group: "991"
+    mode: "0644"
+  notify: restart synapse
+
+- name: Deploy Element Web configuration
+  template:
+    src: element-config.json.j2
+    dest: "{{ matrix_base_dir }}/element-config.json"
+    mode: "0644"
+  notify: restart element
+
+- name: Deploy Nginx configuration
+  template:
+    src: nginx.conf.j2
+    dest: "{{ matrix_base_dir }}/nginx/matrix.conf"
+    mode: "0644"
+  notify: restart nginx
+
+- name: Deploy Docker Compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ matrix_base_dir }}/docker-compose.yml"
+    mode: "0644"
+
+# --- Pull images and start ---
+- name: Pull Docker images (uses Iranian registry mirrors)
+  command: "docker pull {{ item }}"
+  loop:
+    - postgres:16-alpine
+    - nginx:alpine
+    - vectorim/element-web:latest
+    - matrixdotorg/synapse:latest
+  register: pull_result
+  retries: 3
+  delay: 5
+  until: pull_result.rc == 0
+
+- name: Start Matrix stack
+  command: docker compose up -d
+  args:
+    chdir: "{{ matrix_base_dir }}"
+  changed_when: true
+
+- name: Wait for Synapse to be ready
+  uri:
+    url: "https://127.0.0.1/_matrix/client/versions"
+    validate_certs: false
+    status_code: 200
+  register: synapse_health
+  retries: 30
+  delay: 5
+  until: synapse_health.status == 200
+
+- name: Show connection info
+  debug:
+    msg: |
+      =====================================================
+      Matrix server is running!
+      =====================================================
+      Synapse:  https://{{ matrix_hostname }}
+      Element:  https://{{ element_hostname }}
+      Federation port: {{ matrix_federation_port | default(8448) }}
+
+      Create your first admin user:
+        ./scripts/create-user.sh admin --admin
+
+      To get a real TLS certificate:
+        ./scripts/get-cert.sh {{ matrix_server_name }}
+        ./scripts/sync-certs.sh {{ matrix_server_name }} localhost <target-ssh-host>
+      =====================================================

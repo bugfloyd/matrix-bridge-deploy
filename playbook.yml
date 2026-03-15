@@ -1,0 +1,60 @@
+---
+- name: Deploy Matrix/Element secure messaging
+  hosts: all
+  become: true
+
+  pre_tasks:
+    - name: Configure apt to use SSH-tunneled proxy
+      copy:
+        content: |
+          Acquire::http::Proxy "http://127.0.0.1:{{ apt_proxy_port }}";
+          Acquire::https::Proxy "http://127.0.0.1:{{ apt_proxy_port }}";
+        dest: /etc/apt/apt.conf.d/99proxy
+        mode: "0644"
+      when: use_proxy | default(false)
+      tags: [proxy]
+
+    - name: Test proxy connectivity
+      uri:
+        url: http://archive.ubuntu.com
+        method: HEAD
+        status_code: [200, 301, 302]
+      environment:
+        http_proxy: "http://127.0.0.1:{{ apt_proxy_port }}"
+        https_proxy: "http://127.0.0.1:{{ apt_proxy_port }}"
+      register: proxy_test
+      retries: 3
+      delay: 2
+      when: use_proxy | default(false)
+      tags: [proxy]
+
+  roles:
+    - common
+    - docker
+    - federation
+    - matrix
+    - certbot
+
+  post_tasks:
+    - name: Remove apt proxy configuration
+      file:
+        path: /etc/apt/apt.conf.d/99proxy
+        state: absent
+      when: use_proxy | default(false)
+      tags: [proxy]
+
+    - name: Remove Docker proxy configuration
+      file:
+        path: /etc/systemd/system/docker.service.d/proxy.conf
+        state: absent
+      register: docker_proxy_cleanup
+      when: docker_pull_proxy | default('') | length > 0
+      tags: [proxy]
+
+    - name: Reload Docker after proxy removal
+      systemd:
+        daemon_reload: true
+        name: docker
+        state: restarted
+      when: docker_proxy_cleanup.changed | default(false)
+      tags: [proxy]

@@ -1,0 +1,15 @@
+---
+- name: restart synapse
+  command: docker compose restart synapse
+  args:
+    chdir: "{{ matrix_base_dir }}"
+
+- name: restart element
+  command: docker compose restart element
+  args:
+    chdir: "{{ matrix_base_dir }}"
+
+- name: restart nginx
+  command: docker compose restart nginx
+  args:
+    chdir: "{{ matrix_base_dir }}"

@@ -1,0 +1,87 @@
+---
+- name: Check if Docker is installed
+  command: docker --version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Add Docker GPG key
+  shell: |
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL {% if use_proxy | default(false) %}--proxy "http://127.0.0.1:{{ apt_proxy_port }}" {% endif %}\
+      https://download.docker.com/linux/ubuntu/gpg \
+      -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+  when: docker_check.rc != 0
+
+- name: Add Docker apt repository
+  shell: |
+    ARCH="$(dpkg --print-architecture)"
+    CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+    echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
+      > /etc/apt/sources.list.d/docker.list
+  when: docker_check.rc != 0
+
+- name: Update apt cache after adding Docker repo
+  apt:
+    update_cache: true
+  when: docker_check.rc != 0
+
+- name: Install Docker packages
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+
+- name: Configure Docker daemon
+  copy:
+    content: "{{ {'registry-mirrors': docker_registry_mirrors | default([])} | to_nice_json }}\n"
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  register: docker_daemon_config
+
+- name: Create Docker systemd drop-in directory
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: "0755"
+  when: docker_pull_proxy | default('') | length > 0
+
+- name: Configure Docker daemon proxy for image pulls
+  copy:
+    content: |
+      [Service]
+      Environment="HTTP_PROXY={{ docker_pull_proxy }}"
+      Environment="HTTPS_PROXY={{ docker_pull_proxy }}"
+      Environment="NO_PROXY=localhost,127.0.0.1"
+    dest: /etc/systemd/system/docker.service.d/proxy.conf
+    mode: "0644"
+  register: docker_proxy_config
+  when: docker_pull_proxy | default('') | length > 0
+
+- name: Remove Docker proxy config if not needed
+  file:
+    path: /etc/systemd/system/docker.service.d/proxy.conf
+    state: absent
+  register: docker_proxy_removed
+  when: docker_pull_proxy | default('') | length == 0
+
+- name: Reload systemd and restart Docker (config changed)
+  systemd:
+    daemon_reload: true
+    name: docker
+    state: restarted
+  when: docker_daemon_config.changed or docker_proxy_removed.changed | default(false) or docker_proxy_config.changed | default(false)
+
+- name: Enable and start Docker
+  systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Verify Docker is working
+  command: docker info
+  changed_when: false

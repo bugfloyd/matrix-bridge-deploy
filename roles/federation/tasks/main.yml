@@ -1,0 +1,32 @@
+---
+# Federation networking — runs AFTER Docker is installed (needs docker0 interface)
+
+- name: Enable route_localnet for federation DNAT
+  sysctl:
+    name: "net.ipv4.conf.{{ item }}.route_localnet"
+    value: "1"
+    sysctl_set: true
+    reload: true
+  loop:
+    - all
+    - docker0
+  when: federation_peers | default([]) | length > 0
+
+- name: Add iptables DNAT for federation ports (172.17.0.1 to 127.0.0.1)
+  iptables:
+    table: nat
+    chain: PREROUTING
+    protocol: tcp
+    destination: "172.17.0.1"
+    destination_port: "{{ item.port }}"
+    jump: DNAT
+    to_destination: "127.0.0.1:{{ item.port }}"
+    comment: "Matrix federation port forward {{ item.port }}"
+  loop: "{{ federation_peers | default([]) }}"
+
+- name: Persist iptables rules
+  shell: |
+    which netfilter-persistent >/dev/null 2>&1 || apt-get install -y iptables-persistent
+    netfilter-persistent save
+  changed_when: false
+  when: federation_peers | default([]) | length > 0

@@ -1,0 +1,30 @@
+version: 1
+
+formatters:
+  precise:
+    format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: precise
+    stream: ext://sys.stderr
+{% if matrix_minimal_logging %}
+    level: WARNING
+{% else %}
+    level: INFO
+{% endif %}
+
+loggers:
+  synapse.storage.SQL:
+    level: WARNING
+
+root:
+{% if matrix_minimal_logging %}
+  level: WARNING
+{% else %}
+  level: INFO
+{% endif %}
+  handlers: [console]
+
+disable_existing_loggers: false

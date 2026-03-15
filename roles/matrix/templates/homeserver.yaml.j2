@@ -1,0 +1,104 @@
+## Synapse Configuration — managed by Ansible
+
+server_name: "{{ matrix_server_name }}"
+pid_file: /data/homeserver.pid
+web_client_location: "https://{{ element_hostname }}"
+public_baseurl: "https://{{ matrix_hostname }}/"
+
+# --- Listeners ---
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: false
+
+# --- Database ---
+database:
+  name: psycopg2
+  args:
+    user: synapse
+    password: "{{ postgres_password }}"
+    database: synapse
+    host: postgres
+    port: 5432
+    cp_min: 2
+    cp_max: 5
+
+# --- Logging ---
+log_config: "/data/log.config"
+
+# --- Media ---
+media_store_path: /data/media_store
+max_upload_size: 50M
+
+# --- Registration ---
+enable_registration: {{ matrix_enable_registration | to_json }}
+registration_shared_secret: "{{ matrix_registration_shared_secret }}"
+# No email or phone required — username/password only
+registrations_require_3pid: []
+enable_3pid_lookup: false
+
+# --- E2E Encryption ---
+# Force encryption on for all rooms by default
+encryption_enabled_by_default_for_room_type: "all"
+
+# --- Federation ---
+{% if matrix_federation_whitelist %}
+# Only federate with these servers
+federation_domain_whitelist:
+{% for domain in matrix_federation_whitelist %}
+  - {{ domain }}
+{% endfor %}
+{% else %}
+# Federation disabled — no servers allowed
+federation_domain_whitelist: []
+{% endif %}
+
+{% if federation_peers | default([]) | length > 0 %}
+# Allow federation traffic to private IPs (Docker bridge + localhost via SSH tunnel)
+ip_range_whitelist:
+  - '127.0.0.1/8'
+  - '172.16.0.0/12'
+  - '::1/128'
+{% endif %}
+
+# --- Secrets ---
+macaroon_secret_key: "{{ matrix_macaroon_secret_key }}"
+form_secret: "{{ matrix_form_secret }}"
+signing_key_path: "/data/signing.key"
+
+# No external key servers (isolated deployment)
+trusted_key_servers: []
+suppress_key_server_warning: true
+
+# --- Retention Policy ---
+retention:
+  enabled: true
+  default_policy:
+    min_lifetime: 1d
+    max_lifetime: {{ matrix_retention_max_lifetime }}
+  allowed_lifetime_min: 1d
+  allowed_lifetime_max: {{ matrix_retention_max_lifetime }}
+  purge_jobs:
+    - longest_max_lifetime: {{ matrix_retention_max_lifetime }}
+      interval: 12h
+
+# --- Rate Limiting (relaxed for internal use) ---
+rc_message:
+  per_second: 10
+  burst_count: 50
+
+rc_registration:
+  per_second: 0.5
+  burst_count: 5
+
+# --- Cache (tuned for 4GB RAM server) ---
+caches:
+  global_factor: 0.5
+
+# --- Misc ---
+report_stats: false
+enable_metrics: false

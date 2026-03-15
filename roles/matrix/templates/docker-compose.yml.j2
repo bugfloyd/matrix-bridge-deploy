@@ -1,0 +1,74 @@
+services:
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: synapse
+    restart: unless-stopped
+    volumes:
+      - {{ matrix_base_dir }}/synapse:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+{% if federation_peers | default([]) | length > 0 %}
+    extra_hosts:
+{% for peer in federation_peers %}
+      - "{{ peer.hostname }}:host-gateway"
+{% endfor %}
+{% endif %}
+    mem_limit: 1g
+    networks:
+      - matrix
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: matrix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+      POSTGRES_DB: synapse
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    networks:
+      - matrix
+
+  element:
+    image: vectorim/element-web:latest
+    container_name: element
+    restart: unless-stopped
+    volumes:
+      - {{ matrix_base_dir }}/element-config.json:/app/config.json:ro
+    mem_limit: 128m
+    networks:
+      - matrix
+
+  nginx:
+    image: nginx:alpine
+    container_name: matrix-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "{{ matrix_federation_port | default(8448) }}:{{ matrix_federation_port | default(8448) }}"
+    volumes:
+      - {{ matrix_base_dir }}/nginx/matrix.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - synapse
+      - element
+    mem_limit: 128m
+    networks:
+      - matrix
+
+volumes:
+  postgres-data:
+
+networks:
+  matrix:
+    driver: bridge

@@ -1,0 +1,44 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: true
+
+- name: Install base packages
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - openssl
+      - python3-docker
+    state: present
+
+- name: Set timezone
+  timezone:
+    name: "{{ matrix_timezone | default('UTC') }}"
+
+- name: Configure sysctl for Docker
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    reload: true
+  loop:
+    - { key: "net.ipv4.ip_forward", value: "1" }
+    - { key: "net.ipv6.conf.all.forwarding", value: "1" }
+
+- name: Add federation hosts entries (route traffic through SSH tunnel)
+  lineinfile:
+    path: /etc/hosts
+    regexp: ".*{{ item.hostname }}$"
+    line: "127.0.0.1    {{ item.hostname }}"
+    state: present
+  loop: "{{ federation_peers | default([]) }}"
+  when: federation_peers | default([]) | length > 0
+
+- name: Create matrix base directory
+  file:
+    path: "{{ matrix_base_dir }}"
+    state: directory
+    mode: "0755"

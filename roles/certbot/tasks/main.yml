@@ -1,0 +1,60 @@
+---
+# Runs certbot directly on the server (EU instances with internet access)
+# Skipped entirely when certbot_on_server is false (Iran)
+
+- name: Install certbot and Cloudflare DNS plugin
+  apt:
+    name:
+      - certbot
+      - python3-certbot-dns-cloudflare
+    state: present
+  when: certbot_on_server | default(false)
+
+- name: Create Cloudflare credentials file
+  copy:
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token }}"
+    dest: /root/.cloudflare-credentials
+    mode: "0600"
+  when:
+    - certbot_on_server | default(false)
+    - cloudflare_api_token | default('') | length > 0
+
+- name: Check if Let's Encrypt certificate exists
+  stat:
+    path: "/etc/letsencrypt/renewal/{{ matrix_server_name }}.conf"
+  register: le_cert_check
+  when: certbot_on_server | default(false)
+
+- name: Remove self-signed cert directory before certbot
+  file:
+    path: "{{ matrix_tls_cert_dir }}"
+    state: absent
+  when:
+    - certbot_on_server | default(false)
+    - not (le_cert_check.stat.exists | default(false))
+    - cloudflare_api_token | default('') | length > 0
+
+- name: Obtain TLS certificate via Cloudflare DNS
+  command: >
+    certbot certonly --dns-cloudflare
+    --dns-cloudflare-credentials /root/.cloudflare-credentials
+    --dns-cloudflare-propagation-seconds 30
+    -d {{ matrix_server_name }}
+    -d {{ element_hostname }}
+    {% for peer in federation_peers | default([]) %}-d {{ peer.hostname }} {% endfor %}
+    --agree-tos --no-eff-email --non-interactive
+    --register-unsafely-without-email
+  when:
+    - certbot_on_server | default(false)
+    - not (le_cert_check.stat.exists | default(false))
+    - cloudflare_api_token | default('') | length > 0
+  notify: restart nginx
+
+- name: Set up certificate auto-renewal
+  cron:
+    name: "certbot-renew-matrix"
+    job: "certbot renew --quiet --deploy-hook 'cd {{ matrix_base_dir }} && docker compose restart nginx'"
+    hour: "3"
+    minute: "30"
+    weekday: "1"
+  when: certbot_on_server | default(false)
