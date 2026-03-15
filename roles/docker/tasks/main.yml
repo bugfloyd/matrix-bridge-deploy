@@ -16,6 +16,7 @@
 
 - name: Add Docker apt repository
   shell: |
+    mkdir -p /etc/apt/sources.list.d
     ARCH="$(dpkg --print-architecture)"
     CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
     echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \

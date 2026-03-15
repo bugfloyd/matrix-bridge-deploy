@@ -50,8 +50,8 @@ All services run in Docker containers managed by Docker Compose.
 - Ubuntu 24.04 or Debian 12+
 - Root access (or a sudo-capable user — set `ansible_user` in your inventory accordingly)
 - At least 2GB RAM
-- **Iran server:** DNS servers must be able to resolve Iranian local domains (e.g. `docker.arvancloud.ir`) if using Docker registry mirrors. If DNS is broken, set `docker_pull_proxy` to pull images through the SSH-tunneled HTTP proxy instead.
-- **Iran server:** If default DNS resolvers are unreachable, configure Iranian DNS servers before running the playbook (see [DNS Resolvers for Iran](#dns-resolvers-for-iran) below).
+- **Iran server:** Apt sources must be configured to use Iranian mirrors (e.g. `mirror.arvancloud.ir`). See [ArvanCloud Linux Repository setup](https://www.arvancloud.ir/fa/dev/linux-repository) for instructions. The deployment proxy is only used for `download.docker.com` — all other apt traffic goes directly through the local mirrors.
+- **Iran server:** DNS servers must be able to resolve Iranian local domains (e.g. `docker.arvancloud.ir`) for Docker registry mirrors. If DNS is broken, configure Iranian DNS servers before running the playbook (see [DNS Resolvers for Iran](#dns-resolvers-for-iran) below), or set `docker_pull_proxy` to pull images through the SSH-tunneled proxy instead.
 
 **For federation tunnel (Iran server only):**
 
@@ -158,8 +158,8 @@ The `setup.sh` script accepts a **target** argument — a group name (`iran`, `e
 
 1. Starts a local HTTP forward proxy (`proxy.py`) on your machine
 2. Creates an SSH reverse tunnel (`-R`) so the server can reach the proxy
-3. Configures apt on the server to use the tunnel for package downloads
-4. Installs Docker (with Iranian registry mirrors if configured, or pulls images through the SSH-tunneled proxy)
+3. Configures a selective apt proxy — only `download.docker.com` is proxied; local Iranian mirrors are used directly for all other packages
+4. Installs Docker, pulls images via Iranian registry mirrors (`docker.arvancloud.ir`, `mirror-docker.runflare.com`)
 5. Deploys Synapse, Element, Nginx, Postgres via Docker Compose
 6. Adds `/etc/hosts` entries and iptables DNAT rules for federation
 7. Cleans up the apt proxy config when finished
@@ -559,6 +559,7 @@ To add a new region, create `group_vars/<region>.yml`, add hosts to the inventor
 | Variable                      | Iran                                         | Europe                                       | Description                                                                                              |
 | ----------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `use_proxy`                   | `true`                                       | `false`                                      | Whether to tunnel apt through SSH reverse proxy                                                          |
+| `apt_proxy_domains`           | `["download.docker.com"]`                    | —                                            | If set, only proxy apt traffic for these domains (others go direct via local mirrors)                    |
 | `docker_registry_mirrors`     | `[]` (or Iranian mirrors if DNS works)       | `[]`                                         | Docker daemon registry mirrors                                                                           |
 | `docker_pull_proxy`           | `http://127.0.0.1:8185`                      | —                                            | HTTP proxy for Docker image pulls (uses the SSH-tunneled proxy when mirrors are unreachable)             |
 | `certbot_on_server`           | `false`                                      | `true`                                       | Whether to run certbot directly on the server                                                            |

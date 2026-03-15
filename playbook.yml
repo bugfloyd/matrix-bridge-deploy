@@ -4,14 +4,30 @@
   become: true
 
   pre_tasks:
-    - name: Configure apt to use SSH-tunneled proxy
+    - name: Configure apt to use SSH-tunneled proxy (all traffic)
       copy:
         content: |
           Acquire::http::Proxy "http://127.0.0.1:{{ apt_proxy_port }}";
           Acquire::https::Proxy "http://127.0.0.1:{{ apt_proxy_port }}";
         dest: /etc/apt/apt.conf.d/99proxy
         mode: "0644"
-      when: use_proxy | default(false)
+      when:
+        - use_proxy | default(false)
+        - apt_proxy_domains | default([]) | length == 0
+      tags: [proxy]
+
+    - name: Configure apt to use SSH-tunneled proxy (selective domains only)
+      copy:
+        content: |
+          {% for domain in apt_proxy_domains %}
+          Acquire::http::Proxy::{{ domain }} "http://127.0.0.1:{{ apt_proxy_port }}";
+          Acquire::https::Proxy::{{ domain }} "http://127.0.0.1:{{ apt_proxy_port }}";
+          {% endfor %}
+        dest: /etc/apt/apt.conf.d/99proxy
+        mode: "0644"
+      when:
+        - use_proxy | default(false)
+        - apt_proxy_domains | default([]) | length > 0
       tags: [proxy]
 
     - name: Test proxy connectivity
