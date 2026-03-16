@@ -24,3 +24,7 @@ matrix_tls_key_path: "{{ matrix_tls_cert_dir }}/privkey.pem"
 
 # --- SSH Proxy port (used when use_proxy is true) ---
 apt_proxy_port: 8185
+
+# --- Xray Federation Tunnel ---
+tunnel_vless_uuid: "{{ lookup('file', 'credentials/tunnel_vless_uuid', errors='ignore') | default('') }}"
+tunnel_vless_port: 8443

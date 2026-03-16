@@ -30,9 +30,9 @@ element_country_code: "DE"
 # --- Federation ---
 matrix_federation_port: 8449
 
-# Resolve federated servers to localhost (traffic goes through SSH tunnel)
+# Resolve federated servers to localhost (traffic goes through xray tunnel)
 # hostname: the remote server's Matrix hostname
-# port: the remote server's federation port (forwarded via SSH tunnel)
+# port: the remote server's federation port (forwarded via xray reverse tunnel)
 federation_peers:
   - { hostname: "ir.example.com", port: 8448 }
 

@@ -1,0 +1,91 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "reverse": {
+    "bridges": [
+      {
+        "tag": "bridge",
+        "domain": "tunnel.federation"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "federation-forward",
+      "port": {{ tunnel_eu_federation_port }},
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": {{ tunnel_eu_federation_port }},
+        "network": "tcp"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless-tunnel",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "{{ tunnel_eu_ip }}",
+            "port": {{ tunnel_vless_port }},
+            "users": [
+              {
+                "id": "{{ tunnel_vless_uuid }}",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/tunnel"
+        },
+        "sockopt": {
+          "dialerProxy": "mihomo-socks"
+        }
+      }
+    },
+    {
+      "tag": "mihomo-socks",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": {{ tunnel_socks_port }}
+          }
+        ]
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["bridge"],
+        "domain": ["full:tunnel.federation"],
+        "outboundTag": "vless-tunnel"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["bridge"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["federation-forward"],
+        "outboundTag": "vless-tunnel"
+      }
+    ]
+  }
+}

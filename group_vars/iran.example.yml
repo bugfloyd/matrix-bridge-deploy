@@ -3,19 +3,22 @@
 # =============================================================================
 
 # --- Connectivity ---
-# Iran server has no internet; uses SSH-tunneled proxy for apt
+# SSH proxy is used ONLY for download.docker.com (GPG key + Docker apt repo).
+# All other apt traffic goes direct via local Iranian mirrors.
+# If Iranian mirrors are unreachable, remove apt_proxy_domains to proxy all apt.
 use_proxy: true
+apt_proxy_domains:
+  - "download.docker.com"
 
 # Docker images — if DNS works and Iranian mirrors are accessible, use them:
-# docker_registry_mirrors:
-#   - "https://docker.arvancloud.ir"
-#   - "https://mirror-docker.runflare.com"
-# docker_pull_proxy: ""
+docker_registry_mirrors:
+  - "https://docker.arvancloud.ir"
+  - "https://mirror-docker.runflare.com"
 #
 # If DNS is broken and mirrors are unreachable, pull via the SSH-tunneled HTTP
 # proxy instead (the same proxy setup.sh creates for apt):
-docker_registry_mirrors: []
-docker_pull_proxy: "http://127.0.0.1:{{ apt_proxy_port }}"
+# docker_registry_mirrors: []
+# docker_pull_proxy: "http://127.0.0.1:{{ apt_proxy_port }}"
 
 # TLS certificates are obtained locally and pushed to the server
 certbot_on_server: false
@@ -35,22 +38,20 @@ element_country_code: "IR"
 # --- Federation ---
 matrix_federation_port: 8448
 
-# Resolve federated servers to localhost (traffic goes through SSH tunnel)
+# Resolve federated servers to localhost (traffic goes through xray tunnel)
 # hostname: the remote server's Matrix hostname
-# port: the remote server's federation port (forwarded via SSH tunnel)
+# port: the remote server's federation port (forwarded via xray tunnel)
 federation_peers:
   - { hostname: "eu.example.com", port: 8449 }
 
 matrix_federation_whitelist:
   - "eu.example.com"
 
-# --- Federation Tunnel ---
-# IP address of the EU server (used by the SSH tunnel service on this server)
+# --- Federation Tunnel (xray) ---
+# IP address of the EU server (xray portal)
 tunnel_eu_ip: "203.0.113.1"
-# EU server's federation port (forwarded locally via -L)
+# EU server's federation port (forwarded locally via xray dokodemo-door)
 tunnel_eu_federation_port: 8449
-# Path to the SSH private key used by the tunnel (auto-generated)
-tunnel_ssh_key_path: "/root/.ssh/matrix_ed25519"
-# SOCKS proxy port on this server for outbound SSH connectivity
-# (e.g. v2ray, xray, DNSTT — see README for details)
+# SOCKS proxy port on this server for outbound connectivity
+# (e.g. mihomo, v2ray, xray, sing-box — see README for details)
 tunnel_socks_port: 2080

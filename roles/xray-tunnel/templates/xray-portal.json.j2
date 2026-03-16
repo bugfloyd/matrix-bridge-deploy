@@ -1,0 +1,73 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "reverse": {
+    "portals": [
+      {
+        "tag": "portal",
+        "domain": "tunnel.federation"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "vless-tunnel",
+      "port": {{ tunnel_vless_port }},
+      "listen": "0.0.0.0",
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "{{ tunnel_vless_uuid }}",
+            "level": 0
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/tunnel"
+        }
+      }
+    },
+    {
+      "tag": "reverse-in",
+      "port": {{ federation_peers[0].port }},
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": {{ federation_peers[0].port }},
+        "network": "tcp"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["reverse-in"],
+        "outboundTag": "portal"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["vless-tunnel"],
+        "domain": ["full:tunnel.federation"],
+        "outboundTag": "portal"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["vless-tunnel"],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

@@ -1,0 +1,98 @@
+---
+# =============================================================================
+# Xray Federation Tunnel
+#
+# Installs xray and configures a VLESS-over-WebSocket tunnel for Matrix
+# federation. Iran runs as a bridge (outbound through SOCKS proxy),
+# EU runs as a portal (accepts connections, enables reverse forwarding).
+# =============================================================================
+
+# --- Install xray ---
+
+- name: Check if xray is installed
+  command: /usr/local/bin/xray version
+  register: xray_check
+  changed_when: false
+  failed_when: false
+
+- name: Install unzip
+  apt:
+    name: unzip
+    state: present
+  when: xray_check.rc != 0
+
+- name: Copy xray archive to server
+  copy:
+    src: /tmp/xray-linux-64.zip
+    dest: /tmp/xray-linux-64.zip
+  when: xray_check.rc != 0
+
+- name: Extract and install xray
+  shell: |
+    mkdir -p /usr/local/etc/xray /var/log/xray
+    cd /tmp && unzip -o xray-linux-64.zip -d xray-extract
+    cp xray-extract/xray /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray
+    rm -rf xray-extract xray-linux-64.zip
+  when: xray_check.rc != 0
+
+# --- Disable old SSH tunnel if present ---
+
+- name: Stop and disable old SSH tunnel service
+  systemd:
+    name: matrix-tunnel
+    state: stopped
+    enabled: false
+  failed_when: false
+
+# --- Configure Iran (bridge) ---
+
+- name: Deploy xray bridge configuration (Iran)
+  template:
+    src: xray-bridge.json.j2
+    dest: /usr/local/etc/xray/federation.json
+    mode: "0644"
+  when: "'iran' in group_names"
+  notify: restart xray-federation
+
+- name: Deploy xray-federation systemd service (Iran)
+  template:
+    src: xray-federation.service.j2
+    dest: /etc/systemd/system/xray-federation.service
+    mode: "0644"
+  when: "'iran' in group_names"
+  notify: restart xray-federation
+
+- name: Enable and start xray-federation (Iran)
+  systemd:
+    name: xray-federation
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: "'iran' in group_names"
+
+# --- Configure EU (portal) ---
+
+- name: Deploy xray portal configuration (EU)
+  template:
+    src: xray-portal.json.j2
+    dest: /usr/local/etc/xray/config.json
+    mode: "0644"
+  when: "'europe' in group_names"
+  notify: restart xray
+
+- name: Deploy xray systemd service (EU)
+  template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    mode: "0644"
+  when: "'europe' in group_names"
+  notify: restart xray
+
+- name: Enable and start xray (EU)
+  systemd:
+    name: xray
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: "'europe' in group_names"

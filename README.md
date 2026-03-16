@@ -12,14 +12,14 @@ Both regions use the same playbook, with per-region variable files controlling b
 **Key properties:**
 
 - End-to-end encrypted messages — if the server is seized, message content is unreadable
-- Federation between regions via SSH tunnels with iptables DNAT forwarding
+- Federation between regions via xray VLESS-over-WebSocket tunnels with iptables DNAT forwarding
 - Runs entirely on internal network after initial setup
 - Automated setup via Ansible
 
 ## Architecture
 
 ```
-┌──────────────── Iran Server ────────────────┐    SSH tunnel    ┌──────────────── EU Server ──────────────────┐
+┌──────────────── Iran Server ────────────────┐   xray tunnel    ┌──────────────── EU Server ──────────────────┐
 │                                             │◄────────────────►│                                             │
 │  ┌───────────┐     ┌──────────┐             │   :8448 ◄► :8449 │  ┌───────────┐     ┌──────────┐             │
 │  │  Nginx    │────►│ Synapse  │──┐          │                  │  │  Nginx    │────►│ Synapse  │──┐          │
@@ -55,7 +55,7 @@ All services run in Docker containers managed by Docker Compose.
 
 **For federation tunnel (Iran server only):**
 
-- A SOCKS5 proxy running on `127.0.0.1:2080` — this can be any v2ray-based proxy (v2ray, xray, sing-box), a DNSTT-based tunnel, or any other SOCKS5-compatible proxy. Setting up this proxy is out of scope for this project. The tunnel service will auto-reconnect when the proxy becomes available.
+- A SOCKS5 proxy running on `127.0.0.1:2080` — this can be any proxy tool (mihomo, v2ray, xray, sing-box) or a DNSTT-based tunnel. Setting up this proxy is out of scope for this project. The xray tunnel connects through it using VLESS over WebSocket.
 
 **A domain:**
 
@@ -177,15 +177,15 @@ Secrets are auto-generated on first run and saved to `credentials/` (gitignored)
 
 ### Step 3 — Federation tunnel
 
-After both servers are deployed, set up the SSH tunnel for federation:
+After both servers are deployed, set up the xray tunnel for federation:
 
 ```bash
 ./scripts/setup-tunnel.sh
 ```
 
-This generates an SSH key on the Iran server, deploys a systemd service that maintains a bidirectional tunnel through the SOCKS proxy, and authorizes the key on the EU server. See [Setting up the SSH tunnel](#setting-up-the-ssh-tunnel) for details.
+This downloads xray, generates a VLESS UUID, and deploys xray on both servers — Iran as a bridge (outbound through SOCKS proxy) and EU as a portal (accepts connections and enables reverse forwarding). See [Setting up the xray tunnel](#setting-up-the-xray-tunnel) for details.
 
-**Prerequisite:** A SOCKS5 proxy must be running on the Iran server at `127.0.0.1:2080` before running this. This can be any v2ray-based (v2ray, xray, sing-box) or DNSTT-based proxy. Setting up this proxy is out of scope for this project.
+**Prerequisite:** A SOCKS5 proxy must be running on the Iran server at `127.0.0.1:2080` before running this. This can be any proxy tool (mihomo, v2ray, xray, sing-box). Setting up this proxy is out of scope for this project.
 
 ### Step 4 — TLS certificates
 
@@ -249,7 +249,7 @@ For mobile, download Element and set the homeserver to `https://ir.example.com` 
 
 ## Federation (Connecting Servers)
 
-Federation lets users on different servers communicate. In this setup, federation traffic flows through SSH tunnels between servers because they may not have direct network connectivity.
+Federation lets users on different servers communicate. In this setup, federation traffic flows through xray tunnels (VLESS over WebSocket) between servers because they may not have direct network connectivity.
 
 ### How federation works in this deployment
 
@@ -258,20 +258,20 @@ Each server uses a different federation port:
 - **Iran:** listens on port **8448**
 - **Europe:** listens on port **8449**
 
-Traffic between them flows through SSH tunnels:
+Traffic between them flows through an xray tunnel (VLESS over WebSocket):
 
 ```
-Iran Synapse ──► 127.0.0.1:8449 ──► [SSH tunnel] ──► EU Nginx :8449
-EU Synapse   ──► 127.0.0.1:8448 ──► [SSH tunnel] ──► Iran Nginx :8448
+Iran Synapse ──► 127.0.0.1:8449 ──► [xray forward] ──► EU Nginx :8449
+EU Synapse   ──► 127.0.0.1:8448 ──► [xray reverse] ──► Iran Nginx :8448
 ```
 
 The mechanism uses four pieces, all configured automatically by the playbook:
 
 1. **`/etc/hosts` entries** — Each server resolves the other's hostname to `127.0.0.1`, so federation traffic goes to localhost instead of the real IP.
 
-2. **SSH tunnels** — Persistent SSH tunnels (set up by you via autossh/systemd) forward the remote federation port to localhost. For example, on the Iran server: `ssh -L 8449:localhost:8449 eu-ssh-host` makes EU's port 8449 available at Iran's `localhost:8449`.
+2. **Xray tunnel** — Iran runs xray as a bridge connecting to EU's xray portal through the SOCKS proxy (mihomo). A dokodemo-door inbound on Iran's port 8449 forwards traffic to EU's port 8449 (forward direction). EU's dokodemo-door on port 8448 uses xray's reverse proxy to route traffic back through the bridge to Iran's port 8448 (reverse direction). WebSocket transport keeps the connection alive through the SOCKS proxy.
 
-3. **iptables DNAT** — Synapse runs inside Docker and resolves federated hostnames to `172.17.0.1` (the Docker bridge IP via `host-gateway`). An iptables PREROUTING rule DNATs `172.17.0.1:<port>` to `127.0.0.1:<port>`, routing traffic to the SSH tunnel. The `route_localnet` sysctl is enabled to allow DNAT to localhost.
+3. **iptables DNAT** — Synapse runs inside Docker and resolves federated hostnames to `172.17.0.1` (the Docker bridge IP via `host-gateway`). An iptables PREROUTING rule DNATs `172.17.0.1:<port>` to `127.0.0.1:<port>`, routing traffic to the xray tunnel. The `route_localnet` sysctl is enabled to allow DNAT to localhost.
 
 4. **`.well-known` proxy in Nginx** — Before federating, Synapse checks `https://<server>:443/.well-known/matrix/server` to discover the federation port. Since the hostname resolves to localhost, this request hits the local Nginx. The playbook adds an Nginx server block for each federated peer's hostname that returns the correct `.well-known` response (e.g., `{"m.server": "ir.example.com:8448"}`). Without this, Synapse would see the local server's `.well-known` and fail.
 
@@ -310,7 +310,7 @@ Each `federation_peers` entry configures:
 
 ### SRV DNS records
 
-SRV records help external Matrix servers discover your federation endpoints. They're optional for the SSH tunnel setup between your own servers but recommended:
+SRV records help external Matrix servers discover your federation endpoints. They're optional for the xray tunnel setup between your own servers but recommended:
 
 | Type | Name                  | Priority | Weight | Port | Target           |
 | ---- | --------------------- | -------- | ------ | ---- | ---------------- |
@@ -326,24 +326,26 @@ Re-run both playbooks after changing federation settings:
 ./scripts/setup.sh europe
 ```
 
-### Setting up the SSH tunnel
+### Setting up the xray tunnel
 
-A separate playbook (`tunnel.yml`) automates the federation tunnel setup. It creates a persistent, bidirectional SSH tunnel from the Iran server to the EU server using a systemd service.
+A separate playbook (`tunnel.yml`) automates the federation tunnel setup using xray with VLESS over WebSocket. This is more reliable than SSH tunnels through SOCKS proxies, which tend to kill long-lived idle connections.
 
 **Prerequisites:**
 
-The Iran server must have a **SOCKS proxy** running on `127.0.0.1:2080`. This can be any SOCKS5-compatible proxy — for example, a v2ray-based proxy (v2ray, xray, sing-box) or a DNSTT-based tunnel. Setting up this proxy is **out of scope** for this project; it is assumed to already be running before the tunnel playbook is executed.
+The Iran server must have a **SOCKS proxy** running on `127.0.0.1:2080`. This can be any SOCKS5-compatible proxy — for example, mihomo, v2ray, xray, or sing-box. Setting up this proxy is **out of scope** for this project; it is assumed to already be running before the tunnel playbook is executed.
 
 **What the tunnel playbook does:**
 
-1. Generates an ed25519 SSH key pair on the Iran server (`/root/.ssh/matrix_ed25519`)
-2. Installs `netcat-openbsd` on the Iran server (provides `nc` with SOCKS5 support for the SSH ProxyCommand)
-3. Deploys a `matrix-tunnel.service` systemd unit that:
-   - Opens a local forward (`-L`) for the EU federation port (e.g. 8449) — so Iran's Synapse can reach EU
-   - Opens a reverse forward (`-R`) for Iran's federation port (e.g. 8448) — so EU's Synapse can reach Iran
-   - Routes the SSH connection through the local SOCKS proxy via `nc -X 5 -x 127.0.0.1:2080`
-   - Auto-restarts on failure
-4. Authorizes the generated public key on the EU server's `authorized_keys`
+1. Downloads the xray binary on the control machine and copies it to both servers
+2. Generates a VLESS UUID (saved in `credentials/tunnel_vless_uuid`)
+3. Deploys xray on Iran as a **bridge**:
+   - `xray-federation.service` with a dokodemo-door inbound on port 8449 (forwards to EU's federation port through the VLESS tunnel)
+   - Reverse bridge that allows EU to reach Iran's federation port back through the same connection
+   - All traffic routes through mihomo's SOCKS proxy via xray's `dialerProxy`
+4. Deploys xray on EU as a **portal**:
+   - `xray.service` with a VLESS-over-WebSocket server on port 8443 (accepts tunnel from Iran)
+   - dokodemo-door inbound on port 8448 (routes traffic to Iran through the reverse bridge)
+5. Disables the old SSH tunnel service if present
 
 **Run it:**
 
@@ -362,15 +364,23 @@ ansible-playbook tunnel.yml
 ```yaml
 tunnel_eu_ip: "203.0.113.1" # EU server's public IP
 tunnel_eu_federation_port: 8449 # EU's federation port (matches europe.yml)
-tunnel_ssh_key_path: "/root/.ssh/matrix_ed25519"
 tunnel_socks_port: 2080 # SOCKS proxy port on Iran server
+```
+
+Shared settings in `group_vars/all.yml`:
+
+```yaml
+tunnel_vless_port: 8443 # Port EU listens on for VLESS connections
+tunnel_vless_uuid: "..." # Auto-generated, stored in credentials/
 ```
 
 **Check tunnel status:**
 
 ```bash
-ssh iran-ssh-host "systemctl status matrix-tunnel"
-ssh iran-ssh-host "journalctl -u matrix-tunnel -f"
+ssh ir-ssh-host "systemctl status xray-federation"
+ssh eu-ssh-host "systemctl status xray"
+ssh ir-ssh-host "journalctl -u xray-federation -f"
+ssh eu-ssh-host "journalctl -u xray -f"
 ```
 
 ### Federation troubleshooting
@@ -378,11 +388,11 @@ ssh iran-ssh-host "journalctl -u matrix-tunnel -f"
 **Check that federation ports are listening:**
 
 ```bash
-# On Iran server — should show :8448 listening (Nginx) and :8449 (SSH tunnel)
+# On Iran server — should show :8448 listening (Nginx) and :8449 (xray dokodemo-door)
 ss -tlnp | grep -E '8448|8449'
 
-# On EU server — should show :8449 listening (Nginx) and :8448 (SSH tunnel)
-ss -tlnp | grep -E '8448|8449'
+# On EU server — should show :8449 listening (Nginx), :8448 (xray reverse), :8443 (xray VLESS)
+ss -tlnp | grep -E '8443|8448|8449'
 ```
 
 **Check /etc/hosts entries:**
@@ -553,6 +563,8 @@ To add a new region, create `group_vars/<region>.yml`, add hosts to the inventor
 | `matrix_retention_max_lifetime`     | `30d`          | Message retention period before auto-purge    |
 | `matrix_minimal_logging`            | `true`         | Use WARNING-level logging only                |
 | `apt_proxy_port`                    | `8185`         | Port for SSH-tunneled apt proxy               |
+| `tunnel_vless_uuid`                 | auto-generated | VLESS UUID for xray federation tunnel         |
+| `tunnel_vless_port`                 | `8443`         | Port EU listens on for xray VLESS connections |
 
 #### Per-region variables (`group_vars/iran.yml`, `group_vars/europe.yml`)
 
@@ -560,8 +572,8 @@ To add a new region, create `group_vars/<region>.yml`, add hosts to the inventor
 | ----------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `use_proxy`                   | `true`                                       | `false`                                      | Whether to tunnel apt through SSH reverse proxy                                                          |
 | `apt_proxy_domains`           | `["download.docker.com"]`                    | —                                            | If set, only proxy apt traffic for these domains (others go direct via local mirrors)                    |
-| `docker_registry_mirrors`     | `[]` (or Iranian mirrors if DNS works)       | `[]`                                         | Docker daemon registry mirrors                                                                           |
-| `docker_pull_proxy`           | `http://127.0.0.1:8185`                      | —                                            | HTTP proxy for Docker image pulls (uses the SSH-tunneled proxy when mirrors are unreachable)             |
+| `docker_registry_mirrors`     | Iranian mirrors (arvancloud, runflare)       | `[]`                                         | Docker daemon registry mirrors                                                                           |
+| `docker_pull_proxy`           | — (or `http://127.0.0.1:8185` if no mirrors) | —                                            | HTTP proxy for Docker image pulls (fallback when mirrors are unreachable)                                |
 | `certbot_on_server`           | `false`                                      | `true`                                       | Whether to run certbot directly on the server                                                            |
 | `cloudflare_api_token`        | —                                            | from `credentials/cloudflare_token`          | Cloudflare API token for DNS-01 challenge                                                                |
 | `matrix_server_name`          | `ir.example.com`                             | `eu.example.com`                             | Matrix server identity (cannot change after first run)                                                   |
@@ -573,10 +585,9 @@ To add a new region, create `group_vars/<region>.yml`, add hosts to the inventor
 | `matrix_federation_port`      | `8448`                                       | `8449`                                       | Port Nginx listens on for federation traffic                                                             |
 | `federation_peers`            | `[{hostname: "eu.example.com", port: 8449}]` | `[{hostname: "ir.example.com", port: 8448}]` | Federated servers: configures /etc/hosts, iptables DNAT, docker extra_hosts, and Nginx .well-known proxy |
 | `matrix_federation_whitelist` | `["eu.example.com"]`                         | `["ir.example.com"]`                         | Servers allowed to federate (empty list disables federation)                                             |
-| `tunnel_eu_ip`                | `203.0.113.1`                                | —                                            | EU server's public IP (used by tunnel service on Iran)                                                   |
-| `tunnel_eu_federation_port`   | `8449`                                       | —                                            | EU's federation port to forward locally                                                                  |
-| `tunnel_ssh_key_path`         | `/root/.ssh/matrix_ed25519`                  | —                                            | SSH private key path for the tunnel                                                                      |
-| `tunnel_socks_port`           | `2080`                                       | —                                            | SOCKS5 proxy port on Iran server (v2ray, DNSTT, etc.)                                                    |
+| `tunnel_eu_ip`                | `203.0.113.1`                                | —                                            | EU server's public IP (xray portal address)                                                              |
+| `tunnel_eu_federation_port`   | `8449`                                       | —                                            | EU's federation port (forwarded via xray dokodemo-door)                                                  |
+| `tunnel_socks_port`           | `2080`                                       | —                                            | SOCKS5 proxy port on Iran server (mihomo, v2ray, etc.)                                                   |
 
 ## File Structure
 
@@ -589,17 +600,21 @@ matrix-bridge-deploy/
 │   ├── iran.yml                        # Iran: proxy, mirrors, federation port 8448
 │   └── europe.yml                      # Europe: certbot, direct access, port 8449
 ├── playbook.yml                        # Main deployment: pre_tasks (proxy), roles, post_tasks (cleanup)
-├── tunnel.yml                          # Federation tunnel: SSH key setup + systemd service on Iran
+├── tunnel.yml                          # Federation tunnel: xray VLESS-over-WebSocket setup on both servers
 ├── credentials/                        # Auto-generated secrets + cloudflare token (gitignored)
 ├── roles/
 │   ├── common/tasks/main.yml           # Base packages, timezone, /etc/hosts, sysctl
 │   ├── docker/tasks/main.yml           # Docker CE install, registry mirrors, proxy config
 │   ├── federation/tasks/main.yml       # route_localnet, iptables DNAT (runs after Docker)
 │   ├── certbot/tasks/main.yml          # On-server certbot + Cloudflare DNS (EU only)
-│   ├── tunnel/
-│   │   ├── tasks/main.yml              # SSH key generation, netcat install, systemd service
+│   ├── xray-tunnel/
+│   │   ├── tasks/main.yml              # Xray install, bridge/portal config, systemd services
+│   │   ├── handlers/main.yml           # Service restart triggers
 │   │   └── templates/
-│   │       └── matrix-tunnel.service.j2  # Bidirectional SSH tunnel systemd unit
+│   │       ├── xray-bridge.json.j2     # Iran: VLESS client + dokodemo-door + reverse bridge
+│   │       ├── xray-portal.json.j2     # EU: VLESS server + dokodemo-door + reverse portal
+│   │       ├── xray-federation.service.j2  # Iran systemd service
+│   │       └── xray.service.j2         # EU systemd service
 │   └── matrix/
 │       ├── tasks/                      # Deployment logic
 │       ├── handlers/                   # Service restart triggers
@@ -611,7 +626,7 @@ matrix-bridge-deploy/
 │           └── log.config.j2           # Python logging config for Synapse
 └── scripts/
     ├── setup.sh                        # Deploy: ./setup.sh <region|host> (auto-detects proxy need)
-    ├── setup-tunnel.sh                 # Set up federation SSH tunnel between Iran and EU
+    ├── setup-tunnel.sh                 # Set up xray federation tunnel between Iran and EU
     ├── proxy.py                        # HTTP forward proxy for SSH tunnel (Iran deployments)
     ├── get-cert.sh                     # Get wildcard cert locally via Cloudflare DNS-01
     ├── sync-certs.sh                   # Push certs to server: ./sync-certs.sh <domain> <source> <target-ssh-host>

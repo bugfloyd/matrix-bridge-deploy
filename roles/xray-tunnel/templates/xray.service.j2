@@ -1,0 +1,14 @@
+[Unit]
+Description=Xray federation tunnel (portal)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
