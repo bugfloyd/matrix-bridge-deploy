@@ -17,7 +17,7 @@ ExecStart=/usr/bin/ssh -N -o ExitOnForwardFailure=yes \
     -i {{ tunnel_ssh_key_path }} \
     root@{{ tunnel_eu_ip }}
 Restart=always
-RestartSec=5
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target

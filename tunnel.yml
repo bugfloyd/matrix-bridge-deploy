@@ -64,3 +64,19 @@
         key: "{{ iran_tunnel_pubkey }}"
         comment: "matrix-federation-tunnel"
         state: present
+
+    - name: Configure sshd to detect dead tunnel connections quickly
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?{{ item.key }}\\s"
+        line: "{{ item.key }} {{ item.value }}"
+      loop:
+        - { key: "ClientAliveInterval", value: "10" }
+        - { key: "ClientAliveCountMax", value: "2" }
+      notify: reload sshd
+
+  handlers:
+    - name: reload sshd
+      systemd:
+        name: sshd
+        state: reloaded

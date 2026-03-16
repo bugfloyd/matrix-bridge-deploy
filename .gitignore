@@ -4,3 +4,4 @@ credentials/
 inventory/hosts.yml
 group_vars/iran.yml
 group_vars/europe.yml
+temp
