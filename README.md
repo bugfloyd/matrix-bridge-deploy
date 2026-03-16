@@ -217,7 +217,11 @@ If you set `cloudflare_api_token` in `group_vars/europe.yml` or saved it in `cre
    - Permission: **Zone > DNS > Edit**
    - Zone resource: **Include > Specific zone > your domain**
 
-### Step 5 — Create users
+### Step 5 — Manage users
+
+All user management scripts take an SSH destination as the first argument — either a `~/.ssh/config` alias (e.g. `ir-ssh-alias`) or `user@ip` (e.g. `root@203.0.113.1`).
+
+**Create users:**
 
 ```bash
 # Create admin user on Iran
@@ -231,14 +235,40 @@ If you set `cloudflare_api_token` in `group_vars/europe.yml` or saved it in `cre
 ./scripts/create-user.sh root@203.0.113.1 bob
 ```
 
-The first argument is an SSH destination — either a `~/.ssh/config` alias (e.g. `ir-ssh-alias`) or `user@ip` (e.g. `root@203.0.113.1`). The second is the Matrix username, and the optional `--admin` flag grants admin privileges.
+The second argument is the Matrix username. The optional `--admin` flag grants admin privileges. You will be prompted for a password.
 
-**Delete a user** (requires admin credentials — you will be prompted):
+**Reset a user's password:**
 
 ```bash
-./scripts/delete-user.sh ir-ssh-alias alice
-./scripts/delete-user.sh root@203.0.113.1 bob
+./scripts/reset-password.sh ir-ssh-alias alice
 ```
+
+You will be prompted for the new password and admin credentials.
+
+**Deactivate a user:**
+
+```bash
+./scripts/deactivate-user.sh ir-ssh-alias alice
+```
+
+Deactivation erases the user's profile data and prevents login, but the **user ID remains permanently reserved** in the Matrix spec — it cannot be re-registered with `create-user.sh`. Use `reactivate-user.sh` to restore it. Requires admin credentials.
+
+**Reactivate a deactivated user:**
+
+```bash
+./scripts/reactivate-user.sh ir-ssh-alias alice
+```
+
+Restores a previously deactivated user and sets a new password. Requires admin credentials.
+
+**Summary of user management scripts:**
+
+| Script | Purpose | Prompts for |
+| ------ | ------- | ----------- |
+| `create-user.sh` | Create a new user | User password |
+| `reset-password.sh` | Change password for an active user | New password, admin credentials |
+| `deactivate-user.sh` | Deactivate user (profile erased, ID reserved) | Admin credentials |
+| `reactivate-user.sh` | Restore a deactivated user with new password | New password, admin credentials |
 
 ### Step 6 — Connect
 
@@ -631,7 +661,9 @@ matrix-bridge-deploy/
     ├── get-cert.sh                     # Get wildcard cert locally via Cloudflare DNS-01
     ├── sync-certs.sh                   # Push certs to server: ./sync-certs.sh <domain> <source> <target-ssh-host>
     ├── create-user.sh                  # Create user: ./create-user.sh <ssh-host> <username> [--admin]
-    └── delete-user.sh                  # Delete user: ./delete-user.sh <ssh-host> <username>
+    ├── deactivate-user.sh              # Deactivate user: ./deactivate-user.sh <ssh-host> <username>
+    ├── reactivate-user.sh              # Reactivate user: ./reactivate-user.sh <ssh-host> <username>
+    └── reset-password.sh               # Reset password: ./reset-password.sh <ssh-host> <username>
 ```
 
 ## Playbook Execution Flow

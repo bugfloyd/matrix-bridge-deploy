@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deactivates and erases a Matrix user from the server.
-# Usage: ./delete-user.sh <ssh-host> <username>
+# Reactivates a previously deactivated Matrix user with a new password.
+# Usage: ./reactivate-user.sh <ssh-host> <username>
 set -euo pipefail
 
 MATRIX_DIR="${MATRIX_BASE_DIR:-/opt/matrix}"
@@ -21,12 +21,8 @@ SERVER_NAME=$(ssh "$SSH_HOST" "grep '^server_name:' ${MATRIX_DIR}/synapse/homese
 USER_ID="@${USERNAME}:${SERVER_NAME}"
 ENCODED_USER_ID=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${USER_ID}', safe=''))")
 
-echo "Deleting user: ${USER_ID}"
-read -p "Are you sure? This cannot be undone. [y/N] " CONFIRM
-if [[ "${CONFIRM,,}" != "y" ]]; then
-    echo "Cancelled."
-    exit 0
-fi
+read -s -p "New password for ${USERNAME}: " PASSWORD
+echo
 
 read -p "Admin username: " ADMIN_USER
 read -s -p "Admin password: " ADMIN_PASS
@@ -38,11 +34,16 @@ TOKEN=\$(curl -sf -X POST http://localhost:8008/_matrix/client/r0/login \
   -d \"{\\\"type\\\": \\\"m.login.password\\\", \\\"user\\\": \\\"${ADMIN_USER}\\\", \\\"password\\\": \\\"${ADMIN_PASS}\\\"}\" \
   | python3 -c \"import sys,json; print(json.load(sys.stdin)[\\\"access_token\\\"])\")
 
-curl -sf -X POST http://localhost:8008/_synapse/admin/v1/deactivate/${ENCODED_USER_ID} \
+RESULT=\$(curl -s -o /dev/stderr -w \"%{http_code}\" -X PUT \
+  http://localhost:8008/_synapse/admin/v2/users/${ENCODED_USER_ID} \
   -H \"Content-Type: application/json\" \
   -H \"Authorization: Bearer \$TOKEN\" \
-  -d \"{\\\"erase\\\": true}\"
+  -d \"{\\\"deactivated\\\": false, \\\"password\\\": \\\"${PASSWORD}\\\"}\")
+
+if [ \"\$RESULT\" != \"200\" ]; then
+  echo \"Failed with status \$RESULT\" >&2
+  exit 1
+fi
 '"
 
-echo ""
-echo "User '${USERNAME}' has been deleted."
+echo "User '${USERNAME}' has been reactivated."
